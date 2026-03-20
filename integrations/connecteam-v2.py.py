@@ -16,18 +16,18 @@ except ImportError:
         def dst(self, dt): return timedelta(0)
 
 # --- Configuration ---
-CONNECTEAM_API_KEY = "dfgdfgdfg123123"
-CONNECTEAM_USERS_URL = "asdadsad1231231"
-CONNECTEAM_TIMESHEET_URL = "asdasda123123"
+CONNECTEAM_API_KEY = "c1a2434a-7b5c-4278-9344-d053779a3c8b"
+CONNECTEAM_USERS_URL = "https://api.connecteam.com/users/v1/users"
+CONNECTEAM_TIMESHEET_URL = "https://api.connecteam.com/time-clock/v1/time-clocks/15454522/timesheet"
 
-# Date Configuration (Leave empty for Daily Sync: Today in Vancouver)
+# Date Configuration (Leave empty for 30-Day Rolling Sync)
 # Format: "YYYY-MM-DD"
 MANUAL_START_DATE = "" 
 MANUAL_END_DATE = ""
 
 # Databox Configuration
-DATABOX_DATASET_ID = "xxx"
-DATABOX_API_KEY = "xxxxxx"
+DATABOX_DATASET_ID = "1a7asdadasdasd"
+DATABOX_API_KEY = "pak_51zxasdasd"
 DATABOX_PUSH_URL = f"https://api.databox.com/v1/datasets/{DATABOX_DATASET_ID}/data"
 DATABOX_VERIFY_URL_TEMPLATE = f"https://api.databox.com/v1/datasets/{DATABOX_DATASET_ID}/ingestions/{{ingestion_id}}"
 DATABOX_BATCH_SIZE = 100
@@ -54,42 +54,46 @@ def get_nested(data, keys, default=None):
             return default
     return temp if temp is not None else default
 
-def get_date_range():
+def get_date_batches():
     """
-    Determines date range based on Configuration variables or defaults to Today (Vancouver).
+    Returns a list of (start_date, end_date) tuples.
+    If Manual, returns a single tuple.
+    If Empty, returns 31 tuples (Today + 30 days back) for daily looping.
     """
     # 1. Check Manual Configuration
     if MANUAL_START_DATE:
-        start = MANUAL_START_DATE
         end = MANUAL_END_DATE if MANUAL_END_DATE else MANUAL_START_DATE
-        print(f"Mode: Historical Sync (Configured: {start} to {end})")
-        return start, end
+        print(f"Mode: Manual Override ({MANUAL_START_DATE} to {end})")
+        return [(MANUAL_START_DATE, end)]
 
     # 2. Check CLI Arguments (Optional Override)
     parser = argparse.ArgumentParser(description="Connecteam to Databox ETL")
     parser.add_argument("--start-date", type=str, help="YYYY-MM-DD")
     parser.add_argument("--end-date", type=str, help="YYYY-MM-DD")
-    args, _ = parser.parse_known_args() # Use parse_known_args to avoid interfering if run in weird envs
+    args, _ = parser.parse_known_args() 
 
     if args.start_date:
-        start = args.start_date
         end = args.end_date if args.end_date else args.start_date
-        print(f"Mode: Historical Sync (CLI: {start} to {end})")
-        return start, end
+        print(f"Mode: CLI Override ({args.start_date} to {end})")
+        return [(args.start_date, end)]
     
-    # 3. Default: Today in Vancouver
+    # 3. Default: 30-Day Rolling Window (Day by Day)
     try:
-        # Try proper timezone
         tz = ZoneInfo("America/Vancouver")
         now_van = datetime.datetime.now(tz)
     except Exception:
-        # Fallback (UTC-8)
         tz = datetime.timezone(datetime.timedelta(hours=-8))
         now_van = datetime.datetime.now(tz)
         
-    today_str = now_van.strftime("%Y-%m-%d")
-    print(f"Mode: Daily Sync (Today: {today_str} [America/Vancouver])")
-    return today_str, today_str
+    date_batches = []
+    # Loop from 30 days ago up to today (0)
+    for i in range(30, -1, -1): 
+        target_date = now_van - datetime.timedelta(days=i)
+        date_str = target_date.strftime("%Y-%m-%d")
+        date_batches.append((date_str, date_str))
+        
+    print(f"Mode: 30-Day Rolling Sync ({date_batches[0][0]} to {date_batches[-1][1]})")
+    return date_batches
 
 # --- API Helper with Rate Limiting & Backoff ---
 
@@ -234,7 +238,7 @@ def fetch_timesheets(start_date, end_date):
     all_timesheet_users = []
     root_metadata = {}
     
-    print(f"Fetching Timesheets ({start_date} to {end_date})...")
+    print(f"\nFetching Timesheets ({start_date} to {end_date})...")
     
     while True:
         params = {
@@ -257,7 +261,7 @@ def fetch_timesheets(start_date, end_date):
         users_batch = data_content.get("users", [])
         
         if offset == 0 and not users_batch:
-            print("No users found in timesheet data for this period.")
+            print("  No records found for this period.")
             return None # Signal empty
             
         if not root_metadata:
@@ -278,7 +282,6 @@ def fetch_timesheets(start_date, end_date):
     return {"users": all_timesheet_users, "metadata": root_metadata}
 
 def process_and_merge(timesheet_raw, users_map):
-    print("Processing and Merging Data...")
     merged_data = []
     
     if not timesheet_raw or not timesheet_raw.get("users"):
@@ -349,8 +352,6 @@ def verify_ingestion(ingestion_id):
         "Accept": "application/vnd.databox.v1+json" 
     }
     
-    print(f"  Verifying ID: {ingestion_id}...")
-    
     for _ in range(5):
         response = make_request("GET", url, headers)
         
@@ -359,14 +360,11 @@ def verify_ingestion(ingestion_id):
             status = data.get("status", "").lower()
             
             if status in ["processed", "success", "in progress", "inprogress"]:
-                print(f"    Status: {status} (OK)")
                 return True
             elif status == "failed":
                 errors = data.get("errors")
                 print(f"    Status: {status}. Errors: {errors}")
                 return False
-            else:
-                print(f"    Status: {status}...")
         
         time.sleep(2)
             
@@ -375,10 +373,9 @@ def verify_ingestion(ingestion_id):
 
 def push_to_databox(data):
     if not data:
-        print("No data to push.")
         return
 
-    print(f"Pushing {len(data)} records to Databox...")
+    print(f"  Pushing {len(data)} records to Databox...")
     
     headers = {
         "x-api-key": DATABOX_API_KEY,
@@ -390,12 +387,8 @@ def push_to_databox(data):
     
     for i in range(0, len(data), DATABOX_BATCH_SIZE):
         batch = data[i:i + DATABOX_BATCH_SIZE]
-        batch_num = (i // DATABOX_BATCH_SIZE) + 1
-        
-        print(f"--- Batch {batch_num}/{total_batches} ({len(batch)} records) ---")
         
         payload = {"records": batch}
-        
         response = make_request("POST", DATABOX_PUSH_URL, headers, json_data=payload)
         
         if response and response.status_code == 200:
@@ -407,34 +400,36 @@ def push_to_databox(data):
                 if not is_ok:
                     print("CRITICAL: Ingestion Failed. Stopping script.")
                     break
-            else:
-                print(f"  Warning: Push OK but no ID found. Response: {res_json}")
         else:
             print("CRITICAL: Batch push failed. Stopping script.")
             break
 
 def main():
-    # 1. Determine Dates
-    start_date, end_date = get_date_range()
+    # 1. Get List of Dates to Process
+    date_batches = get_date_batches()
     
-    # 2. Fetch Timesheets FIRST (Fail fast if no data)
-    ts_raw = fetch_timesheets(start_date, end_date)
+    users_map = None # We will load this lazily to save API calls
     
-    if not ts_raw:
-        print("Script finished: No timesheet data to process.")
-        return
-
-    # 3. Fetch Users (Only if we have timesheets)
-    users_map = fetch_users_map()
-    
-    # 4. Merge
-    final_payload = process_and_merge(ts_raw, users_map)
-    
-    # 5. Push
-    if final_payload:
-        push_to_databox(final_payload)
-    else:
-        print("No data merged after processing. Nothing to push.")
+    # 2. Loop through each date batch
+    for start_date, end_date in date_batches:
+        # Fetch Timesheets for the specific day
+        ts_raw = fetch_timesheets(start_date, end_date)
+        
+        if not ts_raw:
+            continue # Skip to the next day if no records exist
+            
+        # 3. Fetch Users (Only once, on the first day we find timesheet data)
+        if users_map is None:
+            users_map = fetch_users_map()
+            
+        # 4. Merge
+        final_payload = process_and_merge(ts_raw, users_map)
+        
+        # 5. Push
+        if final_payload:
+            push_to_databox(final_payload)
+            
+    print("\n--- Sync Complete ---")
 
 if __name__ == "__main__":
     main()
