@@ -21,7 +21,7 @@ Each script follows the same pattern:
 | [Freshcaller](integrations/freshcaller-v2.py) | Call Center | Call logs and metrics |
 | [Connecteam](integrations/connecteam-v2.py) | Workforce Management | Time tracking, shifts, employee data |
 | [NutshellCRM](integrations/nutshellcrm-v2.py) | CRM | Leads, activities, pipeline data |
-| [MomentumCRM](integrations/momentumcrm-v2.py) | CRM | Contact and deal records |
+| [MomentumCRM](integrations/momentum-crm-v2.py) | CRM | Contact and deal records |
 | [PermaLeads](integrations/permaleads-v2.py) | Lead Generation | Lead records and conversions |
 | [Unleashed](integrations/unleashed-v2.py) | Inventory / ERP | Sales order headers and line items (incremental, HMAC-signed) |
 
