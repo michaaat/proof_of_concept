@@ -23,6 +23,7 @@ Each script follows the same pattern:
 | [NutshellCRM](integrations/nutshellcrm-v2.py) | CRM | Leads, activities, pipeline data |
 | [MomentumCRM](integrations/momentumcrm-v2.py) | CRM | Contact and deal records |
 | [PermaLeads](integrations/permaleads-v2.py) | Lead Generation | Lead records and conversions |
+| [Unleashed](integrations/unleashed-v2.py) | Inventory / ERP | Sales order headers and line items (incremental, HMAC-signed) |
 
 ## Common Features
 
